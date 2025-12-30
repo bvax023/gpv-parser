@@ -1161,15 +1161,15 @@
 
   // Когда вкладка получает фокус
   window.addEventListener("focus", () => {
-    // showInstantLoader();
-    // setTimeout(() => location.reload(), 120);
+     showInstantLoader();
+     setTimeout(() => location.reload(), 120);
   });
 
   // Когда возвращаемся из фона на Android/iOS
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      // showInstantLoader();
-      // setTimeout(() => location.reload(), 120);
+       showInstantLoader();
+       setTimeout(() => location.reload(), 120);
     }
   });
 
