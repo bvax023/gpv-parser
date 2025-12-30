@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GPV parser grup
+// @name         GPV parser черги
 // @namespace    GPV parser
-// @version      2.9.1
+// @version      2.9.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -102,6 +102,12 @@
 
   // Год, по которому строим даты графиков
   const CURRENT_YEAR = TODAY.getFullYear();
+
+  // Хранилище очереди пользователя
+  const STORAGE_MY_QUEUE = "gpv_myqueue_selected";
+
+  // Полный список очередей 1.1 → 6.2
+  const USER_QUEUES = ["1.1","1.2","2.1","2.2","3.1","3.2","4.1","4.2","5.1","5.2","6.1","6.2"];
 
   /* =========================================================
    * ФУНКЦИИ
@@ -512,7 +518,6 @@
     const cutoff = new Date(TODAY);
     cutoff.setDate(TODAY.getDate() - 2);
     cutoff.setHours(0, 0, 0, 0);
-console.log(cutoff);
     for (const b of blocks) {
       if (b.date === null) {
         // если не нашли дату И этот блок НЕ старее позавчера
@@ -762,12 +767,12 @@ console.log(cutoff);
         Показати всі
       </label>
       <div class="gpv-divider"></div>
-      <label class="gpv-toggle">
-        <input type="checkbox" id="gpv-filter-12">
-        Черга 1.2
-      </label>
+        <label class="gpv-toggle">
+          <input type="checkbox" id="gpv-myqueue">
+          Моя черга
+        </label>
+      </div>
     </div>
-  </div>
 
   <div class="gpv-menu" id="gpv-menu">
     <div class="gpv-font-row">
@@ -787,6 +792,10 @@ console.log(cutoff);
       <button data-t="s" data-d="-1">−</button>
       <span id="fs">15px</span>
       <button data-t="s" data-d="1">+</button>
+    </div>
+    <div id="gpv-myqueue-container" class="gpv-font-row">
+       <b>Моя черга:</b>
+       <select id="gpv-myqueue-select" style="padding:4px"></select>
     </div>
   </div>
   `;
@@ -993,27 +1002,66 @@ console.log(cutoff);
   const cbAll = document.getElementById("gpv-show-all");
   cbAll.checked = localStorage.getItem(STORAGE_SHOW_ALL) === "1";
 
-  const cb12 = document.getElementById("gpv-filter-12");
-  cb12.checked = localStorage.getItem(STORAGE_FILTER_12) === "1";
+  const cbMy = document.getElementById("gpv-myqueue");
 
-  function applyVisibility() { // Фильтр "Черга 1.2"
+  // Восстанавливаем состояние
+  cbMy.checked = localStorage.getItem("gpv_myqueue_enabled") === "1";
+
+  // Сохраняет состояние галки Моя черга
+  cbMy.onchange = () => {
+    localStorage.setItem("gpv_myqueue_enabled", cbMy.checked ? "1" : "0");
+    applyVisibility();
+  };
+
+    /**
+   * Создаёт выпадающий список выбора очереди (1.1–6.2).
+   * Выбирается только одна очередь.
+   */
+  function renderMyQueueSelector() {
+    const select = document.getElementById("gpv-myqueue-select");
+    if (!select) return;
+
+    const current = localStorage.getItem(STORAGE_MY_QUEUE) || "1.2";
+
+    // Строим список <option>
+    select.innerHTML = USER_QUEUES
+      .map(q => `<option value="${q}" ${q === current ? "selected" : ""}>${q}</option>`)
+      .join("");
+
+    // обработчик выбора
+    select.onchange = () => {
+      localStorage.setItem(STORAGE_MY_QUEUE, select.value);
+      applyVisibility();
+    };
+  }
+
+  /**
+   * Фильтруем строки графиков.
+   * Если "Моя черга" включена → показываем только выбранную очередь.
+   * Если выключена → показываем всё.
+   */
+  function applyVisibility() {
+    const cb = document.getElementById("gpv-myqueue");
+    const selectedQueue = localStorage.getItem(STORAGE_MY_QUEUE) || "1.2";
+
     document.querySelectorAll(".gpb-row").forEach(r => {
-      if (cb12.checked) {
-        r.classList.toggle("gpv-hidden", !r.className.includes("queue-1-2"));
-      } else {
+
+      // Если чекбокс отключён — показываем всё
+      if (!cb.checked) {
         r.classList.remove("gpv-hidden");
+        return;
       }
+
+      // Если включён — проверяем, совпадает ли очередь
+      const match = r.className.includes("queue-" + selectedQueue.replace(".", "-"));
+      r.classList.toggle("gpv-hidden", !match);
     });
   }
+
 
   cbAll.onchange = () => {
     localStorage.setItem(STORAGE_SHOW_ALL, cbAll.checked ? "1" : "0");
     renderContent();   // без reload()
-  };
-
-  cb12.onchange = () => {
-    localStorage.setItem(STORAGE_FILTER_12, cb12.checked ? "1" : "0");
-    applyVisibility();
   };
 
   applyVisibility();
@@ -1079,6 +1127,8 @@ console.log(cutoff);
 
   //applyFonts();
   renderContent();
+  renderMyQueueSelector();
+  applyVisibility();
 
   /* =========================================================
    * 12. (ОПЦИОНАЛЬНО) АВТО-ОБНОВЛЕНИЕ ПРИ ВОЗВРАТЕ В ПРИЛОЖЕНИЕ
@@ -1111,15 +1161,15 @@ console.log(cutoff);
 
   // Когда вкладка получает фокус
   window.addEventListener("focus", () => {
-     showInstantLoader();
-     setTimeout(() => location.reload(), 120);
+    // showInstantLoader();
+    // setTimeout(() => location.reload(), 120);
   });
 
   // Когда возвращаемся из фона на Android/iOS
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-       showInstantLoader();
-       setTimeout(() => location.reload(), 120);
+      // showInstantLoader();
+      // setTimeout(() => location.reload(), 120);
     }
   });
 
