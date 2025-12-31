@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GPV parser черги
+// @name         GPV parser обновление очередей
 // @namespace    GPV parser
-// @version      2.9.6
+// @version      2.9.7
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -55,7 +55,7 @@
       .replace(/\u00A0/g, " ")
       .replace(/[–—]/g, "-")
       .replace(/\s+/g, " ")
-      .trim();  
+      .trim();
 
   // Строка с очередями вида "1.1: ..." или "2.1, 2.2 - ..."
   const rowRe = /^([1-6]\.[12])(\s*,\s*[1-6]\.[12])*\s*[:\-]?\s*/;
@@ -247,7 +247,17 @@
         if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
           monthIndex = MONTH_INDEX[monthName];
 
-          const d = new Date(CURRENT_YEAR, monthIndex, day);
+          let d = new Date(CURRENT_YEAR, monthIndex, day);
+          d.setHours(0, 0, 0, 0);
+
+          // --- FIX YEAR ROLLOVER ---
+          // Если парсим январь, а сегодня – декабрь → это следующий год
+          if (monthIndex < TODAY.getMonth()) {
+              d.setFullYear(CURRENT_YEAR + 1);
+          }
+
+          date = d;
+
           d.setHours(0, 0, 0, 0);
           date = d;
         } else {
@@ -384,10 +394,10 @@
       const h = Math.floor(totalMinutes / 60);
       const m = totalMinutes % 60;
       if (m === 0) {
-        totalTime = `${h} годин без світла`;
+        totalTime = `${h}:00 год. без світла`;
       } else {
         const mm = m < 10 ? "0" + m : m;
-        totalTime = `${h}:${mm} годин без світла`;
+        totalTime = `${h}:${mm} год. без світла`;
       }
     }
 
@@ -506,6 +516,84 @@
     }
 
     return grouped;
+  }
+
+    /**
+   * computeQueueDiffs(versions)
+   *
+   * На вход: массив versions за один день:
+   * [
+   *   { totalsByQueue: { "1.1": 115, "1.2": 200, ... } },
+   *   { totalsByQueue: { "1.1": 105, "1.2": 200, ... } },
+   *   ...
+   * ]
+   *
+   * Возвращает объект:
+   * {
+   *   "1.1": [ null, -10, null, -5, null ],
+   *   "1.2": [ null, 0, -20, 0, null ],
+   *   ...
+   * }
+   *
+   * Индекс массива соответствует индексу версии.
+   * Значение = разница в МИНУТАХ относительно предыдущей уникальной версии.
+   * null = нет изменений.
+   */
+  function computeQueueDiffs(versions) {
+    const queues = new Set();
+
+    // Собираем все очереди, чтобы проверить каждую
+    for (const v of versions) {
+      for (const q in v.totalsByQueue) queues.add(q);
+    }
+
+    const diffs = {};
+    for (const q of queues) {
+      diffs[q] = Array(versions.length).fill(null);
+    }
+
+    // Идём с конца: от старых версий → к новым
+    for (const q of queues) {
+      let last = null;
+
+      for (let i = versions.length - 1; i >= 0; i--) {
+        const cur = versions[i].totalsByQueue[q] ?? null;
+
+        if (last === null) {
+          // Самая первая версия — точка начала
+          last = cur;
+        } else {
+          if (cur !== last) {
+            // Есть изменение → фиксируем разницу
+            diffs[q][i] = cur - last;
+            last = cur; // обновляем точку отсчёта
+          }
+        }
+      }
+    }
+
+    return diffs;
+  }
+
+    /**
+   * formatDiff(mins)
+   * Возвращает HTML строку вида:
+   *   (+2:00) — красным
+   *   (−1:30) — зелёным
+   * Если mins == null или 0 → возвращает "".
+   */
+  function formatDiff(mins) {
+    if (mins === null || mins === 0) return "";
+
+    const abs = Math.abs(mins);
+    const h = Math.floor(abs / 60);
+    const m = abs % 60;
+    const mm = m < 10 ? "0" + m : m;
+
+    const sign = mins > 0 ? "+" : "−";
+    const cls  = mins > 0 ? "gpv-diff-up" : "gpv-diff-down";
+
+    return `<span class="${cls}">(${sign}${h}:${mm} год.)</span>`;
   }
 
     /**
@@ -755,6 +843,16 @@
 .gpv-hidden {
   display:none!important;
 }
+
+.gpv-diff-up {
+  color: #d00000; /* красный */
+  font-weight: bold;
+}
+
+.gpv-diff-down {
+  color: #008800; /* зеленый */
+  font-weight: bold;
+}
     </style>
   `;
 
@@ -902,6 +1000,9 @@
       // показываем одну или все версии
       const versionsToShow = (group.expanded ? versions : [versions[0]]);
 
+      // Нам нужны ДИФФЫ для ВСЕХ версий графика дня
+      const diffsByQueue = computeQueueDiffs(versions);
+
       // ПЕРЕБОР ВЕРСИЙ
       for (let vIndex = 0; vIndex < versionsToShow.length; vIndex++) {
         const version = versionsToShow[vIndex];
@@ -933,22 +1034,33 @@
             </div>
         `;
 
-        // ==== СТРОКИ ОЧЕРЕДЕЙ ====
-        for (const r of version.rows) {
-          let queueClasses = "";
-          for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
+          // ==== СТРОКИ ОЧЕРЕДЕЙ ====
+          for (const r of version.rows) {
 
-          html += `
-            <div class="gpb-row ${queueClasses}">
-              <div class="gpb-row-summary">
-                <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
-                <span class="gpv-total"> - ${r.totalTime}</span>
+            let queueClasses = "";
+            for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
+
+            // Для каждой очереди считаем diff
+            let diffsHtml = "";
+            for (const q of r.queues) {
+              const diffMinutes = diffsByQueue[q]?.[vIndex] ?? null;
+
+              if (diffMinutes !== null) {
+                const diffStr = formatDiff(diffMinutes);
+                if (diffStr) diffsHtml += " " + diffStr;
+              }
+            }
+
+            html += `
+              <div class="gpb-row ${queueClasses}">
+                <div class="gpb-row-summary">
+                  <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
+                  <span class="gpv-total"> - ${r.totalTime}${diffsHtml}</span>
+                </div>
+                ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
               </div>
-              ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
-            </div>
-          `;
-        }
-
+            `;
+          }
         html += `</div>`;
       }
     }
