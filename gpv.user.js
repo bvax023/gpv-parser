@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser черги
 // @namespace    GPV parser
-// @version      2.9.5
+// @version      2.9.6
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -49,27 +49,13 @@
    * ГЛОБАЛЬНЫЕ КОНСТАНТЫ, РЕГУЛЯРКИ, ДАТЫ
    * ======================================================= */
 
-  // Нормализация строки + вырезание мусора слева от очереди
-  const ROW_CLEAN_RE =
-    /([1-6]\.[12](\s*,\s*[1-6]\.[12])*)\s*[:\-]?\s*\d{1,2}[:;]\d{1,2}\s*[–—-]\s*\d{1,2}[:;]\d{1,2}/;
-  
-  function norm(s) {
-    if (!s) return "";
-  
-    // Приводим NBSP, тире, пробелы
-    let line =
-      s.replace(/\u00A0/g, " ")
-        .replace(/[–—]/g, "-")
-        .replace(/\s+/g, " ")
-        .trim();
-  
-    // Если строка содержит очередь + интервал — обрезаем всё слева
-    const m = line.match(ROW_CLEAN_RE);
-    if (m) {
-      line = line.slice(m.index).trim();
-    }  
-    return line;
-  }
+  // Нормализация строки: NBSP → пробел, длинные тире → '-', схлопываем пробелы
+  const norm = s =>
+    (s || "")
+      .replace(/\u00A0/g, " ")
+      .replace(/[–—]/g, "-")
+      .replace(/\s+/g, " ")
+      .trim();  
 
   // Строка с очередями вида "1.1: ..." или "2.1, 2.2 - ..."
   const rowRe = /^([1-6]\.[12])(\s*,\s*[1-6]\.[12])*\s*[:\-]?\s*/;
