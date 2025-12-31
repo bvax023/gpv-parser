@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser черги
 // @namespace    GPV parser
-// @version      2.9.4
+// @version      2.9.5
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
