@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GPV parser обновление очередей
+// @name         GPV parser group
 // @namespace    GPV parser
-// @version      2.9.7
+// @version      2.9.9
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -83,7 +83,7 @@
   const UPDATED_RE = /\(оновлено\s*(?:о|об)?\s*(\d\d[:\-]\d\d)\)/i;
 
   // Регулярка для разбора интервала на числа
-  const STRICT_INTERVAL_RE = /(\d{1,2})[:;](\d{1,2})\s*[–—-]\s*(\d{1,2})[:;](\d{1,2})/;
+  const STRICT_INTERVAL_RE = /(\d{1,2})[:;-](\d{1,2})\s*[–—-]\s*(\d{1,2})[:;-](\d{1,2})/;
   //const TIME_INTERVAL_STRICT_RE = /(\d\d):(\d\d)\s*[–-]\s*(\d\d):(\d\d)/;
 
   // Специальные фразы "не вимикається / не вимикаються"
@@ -247,17 +247,7 @@
         if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
           monthIndex = MONTH_INDEX[monthName];
 
-          let d = new Date(CURRENT_YEAR, monthIndex, day);
-          d.setHours(0, 0, 0, 0);
-
-          // --- FIX YEAR ROLLOVER ---
-          // Если парсим январь, а сегодня – декабрь → это следующий год
-          if (monthIndex < TODAY.getMonth()) {
-              d.setFullYear(CURRENT_YEAR + 1);
-          }
-
-          date = d;
-
+          const d = new Date(CURRENT_YEAR, monthIndex, day);
           d.setHours(0, 0, 0, 0);
           date = d;
         } else {
@@ -334,7 +324,7 @@
     }
 
     // === ШИРОКАЯ регулярка для поиска всех интервалов времени ===
-    const FIND_INTERVAL_RE = /\d{1,2}[:;]\d{1,2}\s*[–—-]\s*\d{1,2}[:;]\d{1,2}/g;
+    const FIND_INTERVAL_RE = /\d{1,2}[:;-]\d{1,2}\s*[–—-]\s*\d{1,2}[:;-]\d{1,2}/g;
     const found = line.match(FIND_INTERVAL_RE) || [];
 
     // === 5. Проверка: нашли ли ВСЕ интервалы (missingIntervals) ===
@@ -394,10 +384,10 @@
       const h = Math.floor(totalMinutes / 60);
       const m = totalMinutes % 60;
       if (m === 0) {
-        totalTime = `${h}:00 год. без світла`;
+        totalTime = `${h} годин без світла`;
       } else {
         const mm = m < 10 ? "0" + m : m;
-        totalTime = `${h}:${mm} год. без світла`;
+        totalTime = `${h}:${mm} годин без світла`;
       }
     }
 
@@ -435,11 +425,6 @@
     // если строка прошла регулярку очереди, это первая строка графика findHeader() ищет и возвращает заголовок
     const { headerRaw, headerClean, date } = findHeader(lines, i);
 
-    //if (date === null) { // если не нашли дату в заголовке, date=null сохраняем минимальный blocks[index] с date = null
-      //if (DateNullIndexBlocks === -1)
-        //  DateNullIndexBlocks = blocks.length;
-    //}
-
     const rows = [];
     let k = i;
 
@@ -458,23 +443,11 @@
 
     i = k - 1; // перепрыгиваем через собраные строки, что бы for заново в них не искал
   }
-  //console.log(blocks);
+  console.log(blocks);
 
   /* =========================================================
  * ГРУППИРУЕМ ВСЕ БЛОКИ В НОВУЮ АРХИТЕКТУРУ block.moreVersions
- *
- * Что делает:
- * 1. Собирает все блоки с одинаковой датой в один объект.
- * 2. Каждый объект содержит:
- *      - date                (дата графика)
- *      - versions[]          (все версии графика за этот день)
- *      - expanded            (раскрыт или свернут этот день)
- * 3. version хранит:
- *      - headerClean
- *      - rows[]
- *      - totalsByQueue{}     (минуты отключений по каждой очереди)
- *
- * Мы избавляемся от blocksToday/blocksTomorrow/candidateBlocks.
+ * Собирает все блоки с одинаковой датой в один объект.
  * Теперь всё строится поверх groupedByDate.
  * ======================================================= */
 
@@ -482,23 +455,20 @@
     const grouped = {};
 
     for (const b of blocks) {
-      // Если дата не найдена — пропускаем (старые или ошибочные блоки)
       if (!b.date) continue;
 
-      // Ключ в формате YYYY-MM-DD
       const key = b.date.toISOString().slice(0, 10);
 
-      // Если даты ещё нет — создаём запись
       if (!grouped[key]) {
         grouped[key] = {
           date: b.date,
           versions: [],
-          expanded: false     // по умолчанию отображаем только последнюю версию
+          expanded: false,
+          perQueueVersions: {}   // NEW!!!
         };
       }
 
-      // === Считаем суммарное время по каждой очереди (в минутах) ===
-      // (parseRow уже дал totalMinutes)
+      // === собираем totalsByQueue ===
       const totalsByQueue = {};
       for (const r of b.rows) {
         for (const q of r.queues) {
@@ -507,7 +477,6 @@
         }
       }
 
-      // Добавляем версию
       grouped[key].versions.push({
         headerClean: b.headerClean,
         rows: b.rows,
@@ -515,86 +484,48 @@
       });
     }
 
-    return grouped;
-  }
+    // ======================================================
+    // AFTER versions assembled → compute perQueueVersions
+    // ======================================================
+    for (const key in grouped) {
+      const group = grouped[key];
+      const versions = group.versions;
 
-    /**
-   * computeQueueDiffs(versions)
-   *
-   * На вход: массив versions за один день:
-   * [
-   *   { totalsByQueue: { "1.1": 115, "1.2": 200, ... } },
-   *   { totalsByQueue: { "1.1": 105, "1.2": 200, ... } },
-   *   ...
-   * ]
-   *
-   * Возвращает объект:
-   * {
-   *   "1.1": [ null, -10, null, -5, null ],
-   *   "1.2": [ null, 0, -20, 0, null ],
-   *   ...
-   * }
-   *
-   * Индекс массива соответствует индексу версии.
-   * Значение = разница в МИНУТАХ относительно предыдущей уникальной версии.
-   * null = нет изменений.
-   */
-  function computeQueueDiffs(versions) {
-    const queues = new Set();
+      // Для всех 1.1 → 6.2
+      for (const queue of USER_QUEUES) {
+        let arr = [];
 
-    // Собираем все очереди, чтобы проверить каждую
-    for (const v of versions) {
-      for (const q in v.totalsByQueue) queues.add(q);
-    }
+        let last = undefined;
 
-    const diffs = {};
-    for (const q of queues) {
-      diffs[q] = Array(versions.length).fill(null);
-    }
+        // бежим с конца → к началу
+        for (let i = versions.length - 1; i >= 0; i--) {
+          const v = versions[i];
 
-    // Идём с конца: от старых версий → к новым
-    for (const q of queues) {
-      let last = null;
+          // если очереди нет в версии (так бывает редко)
+          if (v.totalsByQueue[queue] === undefined) continue;
 
-      for (let i = versions.length - 1; i >= 0; i--) {
-        const cur = versions[i].totalsByQueue[q] ?? null;
+          const cur = v.totalsByQueue[queue];
 
-        if (last === null) {
-          // Самая первая версия — точка начала
-          last = cur;
-        } else {
-          if (cur !== last) {
-            // Есть изменение → фиксируем разницу
-            diffs[q][i] = cur - last;
-            last = cur; // обновляем точку отсчёта
+          if (last === undefined || cur !== last) {
+            arr.push(v);
+            last = cur;
           }
         }
+
+        arr.reverse();
+
+        // если изменений не было → оставляем только самую старую
+        if (arr.length === 0 && versions.length > 0) {
+          arr = [ versions[versions.length - 1] ];
+        }
+
+        group.perQueueVersions[queue] = arr;
       }
     }
 
-    return diffs;
+    return grouped;
   }
 
-    /**
-   * formatDiff(mins)
-   * Возвращает HTML строку вида:
-   *   (+2:00) — красным
-   *   (−1:30) — зелёным
-   * Если mins == null или 0 → возвращает "".
-   */
-  function formatDiff(mins) {
-    if (mins === null || mins === 0) return "";
-
-    const abs = Math.abs(mins);
-    const h = Math.floor(abs / 60);
-    const m = abs % 60;
-    const mm = m < 10 ? "0" + m : m;
-
-    const sign = mins > 0 ? "+" : "−";
-    const cls  = mins > 0 ? "gpv-diff-up" : "gpv-diff-down";
-
-    return `<span class="${cls}">(${sign}${h}:${mm} год.)</span>`;
-  }
 
     /**
    * если среди всех blocks есть block.date === null,
@@ -606,6 +537,7 @@
     const cutoff = new Date(TODAY);
     cutoff.setDate(TODAY.getDate() - 2);
     cutoff.setHours(0, 0, 0, 0);
+    console.log(cutoff)
     for (const b of blocks) {
       if (b.date === null) {
         // если не нашли дату И этот блок НЕ старее позавчера
@@ -619,8 +551,10 @@
     return false;
   }
 
+  console.log(hasCriticalNullDates(blocks))
+
   const groupedByDate = buildGroupedByDate(blocks);
-  //console.log("groupedByDate =", groupedByDate);
+  console.log("groupedByDate =", groupedByDate);
 
     /* =========================================================
    * ВЫБИРАЕМ ГРУППЫ НА СЕГОДНЯ И НА ЗАВТРА
@@ -639,8 +573,54 @@
   const todayGroup = groupedByDate[TODAY_KEY] || null;
   const tomorrowGroup = groupedByDate[TOMORROW_KEY] || null;
 
-  //console.log("todayGroup =", todayGroup);
-  //console.log("tomorrowGroup =", tomorrowGroup);
+  console.log("todayGroup =", todayGroup);
+  console.log("tomorrowGroup =", tomorrowGroup);
+
+    /**
+   * Вычисляет разницу totalMinutes для очереди queue.
+   * versionsShown — то, что рендерится (значимые или одна версия)
+   * allVersions   — полный список версий (group.versions)
+   * index         — индекс текущей версии в versionsShown
+   * queue         — "1.2"
+   */
+  function formatVersionDiff(versionsShown, allVersions, index, queue) {
+    const cur = versionsShown[index].totalsByQueue[queue];
+    if (cur == null) return "";
+
+    let prev = null;
+
+    // свернутый режим
+    if (versionsShown.length === 1) {
+      if (allVersions.length > 1) {
+        prev = allVersions[1]?.totalsByQueue[queue];
+      }
+    }
+    // развернутый режим
+    else {
+      if (index + 1 < versionsShown.length) {
+        prev = versionsShown[index + 1].totalsByQueue[queue];
+      }
+    }
+
+    if (prev == null) return "";
+
+    const diff = cur - prev;
+    if (diff === 0) return "";
+
+    const sign = diff > 0 ? "+" : "−";
+    const color = diff > 0 ? "#d00000" : "#007431";  // + красный, − зелёный
+
+    const d = Math.abs(diff);
+    const h = Math.floor(d / 60);
+    const m = d % 60;
+    const fm = `${h}:${m < 10 ? "0"+m : m}`;
+
+    return ` <span style="color:${color}; font-weight:700;">(${sign}${fm})</span>`;
+  }
+
+
+
+
 
   /* =========================================================
    * 9. CSS + ВЕРХНЯЯ ПАНЕЛЬ
@@ -843,16 +823,6 @@
 .gpv-hidden {
   display:none!important;
 }
-
-.gpv-diff-up {
-  color: #d00000; /* красный */
-  font-weight: bold;
-}
-
-.gpv-diff-down {
-  color: #008800; /* зеленый */
-  font-weight: bold;
-}
     </style>
   `;
 
@@ -980,12 +950,11 @@
    * ======================================================= */
 
   function renderContentGrouped() {
-    const showAllNow = false; // здесь showAllNow всегда false
-    const dangerNulls = false; // здесь dangerNulls всегда false
+    const showAllNow = false;
+    const dangerNulls = false;
 
     let datesToRender = [];
 
-    // Показываем только tomorrow + today
     if (tomorrowGroup) datesToRender.push(TOMORROW_KEY);
     if (todayGroup) datesToRender.push(TODAY_KEY);
 
@@ -995,13 +964,19 @@
       const group = groupedByDate[dateKey];
       if (!group) continue;
 
-      const versions = group.versions;
+      // --- NEW: выбираем versions + учёт Моя Черга ---
+      let versions = group.versions;
 
-      // показываем одну или все версии
-      const versionsToShow = (group.expanded ? versions : [versions[0]]);
+      const cb = document.getElementById("gpv-myqueue");
+      if (cb && cb.checked) {
+        const queue = localStorage.getItem(STORAGE_MY_QUEUE) || "1.2";
+        versions = group.perQueueVersions[queue];
+      }
 
-      // Нам нужны ДИФФЫ для ВСЕХ версий графика дня
-      const diffsByQueue = computeQueueDiffs(versions);
+      if (!versions || versions.length === 0) continue;
+
+      // показываем либо одну, либо все версии
+      const versionsToShow = group.expanded ? versions : [versions[0]];
 
       // ПЕРЕБОР ВЕРСИЙ
       for (let vIndex = 0; vIndex < versionsToShow.length; vIndex++) {
@@ -1034,33 +1009,29 @@
             </div>
         `;
 
-          // ==== СТРОКИ ОЧЕРЕДЕЙ ====
-          for (const r of version.rows) {
+        // ==== СТРОКИ ОЧЕРЕДЕЙ ====
+        for (const r of version.rows) {
+        let queueClasses = "";
+        for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
 
-            let queueClasses = "";
-            for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
+        const q = r.queues[0]; // фактически в строке одна очередь
+        const diffHTML = formatVersionDiff(
+          versionsToShow,
+          versions,       // полный список версий
+          vIndex,
+          q
+        );
 
-            // Для каждой очереди считаем diff
-            let diffsHtml = "";
-            for (const q of r.queues) {
-              const diffMinutes = diffsByQueue[q]?.[vIndex] ?? null;
-
-              if (diffMinutes !== null) {
-                const diffStr = formatDiff(diffMinutes);
-                if (diffStr) diffsHtml += " " + diffStr;
-              }
-            }
-
-            html += `
-              <div class="gpb-row ${queueClasses}">
-                <div class="gpb-row-summary">
-                  <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
-                  <span class="gpv-total"> - ${r.totalTime}${diffsHtml}</span>
-                </div>
-                ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
-              </div>
-            `;
-          }
+        html += `
+          <div class="gpb-row ${queueClasses}">
+            <div class="gpb-row-summary">
+              <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
+              <span class="gpv-total"> - ${r.totalTime}${diffHTML}</span>
+            </div>
+            ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
+          </div>
+        `;
+      }
         html += `</div>`;
       }
     }
@@ -1122,7 +1093,7 @@
   // Сохраняет состояние галки Моя черга
   cbMy.onchange = () => {
     localStorage.setItem("gpv_myqueue_enabled", cbMy.checked ? "1" : "0");
-    applyVisibility();
+    renderContent();
   };
 
     /**
@@ -1143,7 +1114,7 @@
     // обработчик выбора
     select.onchange = () => {
       localStorage.setItem(STORAGE_MY_QUEUE, select.value);
-      applyVisibility();
+      renderContent();
     };
   }
 
