@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser group
 // @namespace    GPV parser
-// @version      3.0.0
+// @version      3.0.1
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -1108,6 +1108,7 @@
 .gpv-arrow{
   margin-left:7px;
   cursor:pointer;
+  line-height:1;
 }
 
 /* Завтрашний график — зелёный */
