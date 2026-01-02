@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser group
 // @namespace    GPV parser
-// @version      3.0.1
+// @version      3.0.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -1052,11 +1052,69 @@
   user-select: none;
 }
 
-#gpv-myqueue-select{
-  width: 60px;
-  padding: 4px;
-
+/* ===== Custom select ===== */
+#gpv-myqueue-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.gpv-cselect {
+  position: relative;
+  width: 60px;
+  font-size: 14px;
+  user-select: none;
+}
+
+.gpv-cselect-current {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.gpv-cselect-arrow {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.gpv-cselect-list {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-top: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 9999;
+}
+
+.gpv-cselect.open .gpv-cselect-list {
+  display: block;
+}
+
+.gpv-cselect-item {
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.gpv-cselect-item:hover {
+  background: #f0f0f0;
+}
+
+.gpv-cselect-item.active {
+  background: #e6e6e6;
+  font-weight: 600;
+}
+
 
 /* ======= CARD (block) ======= */
 .content {
@@ -1221,7 +1279,13 @@
     </div>
     <div id="gpv-myqueue-container" class="gpv-font-row">
        <b>Моя черга:</b>
-       <select id="gpv-myqueue-select"></select>
+       <div class="gpv-cselect" id="gpv-cselect">
+          <div class="gpv-cselect-current" id="gpv-cselect-current">
+            1.2
+            <span class="gpv-cselect-arrow">▾</span>
+          </div>
+          <div class="gpv-cselect-list" id="gpv-cselect-list"></div>
+        </div>
     </div>
   </div>
   `;
@@ -1458,23 +1522,48 @@
    * Создаёт выпадающий список выбора очереди (1.1–6.2).
    * Выбирается только одна очередь.
    */
-  function renderMyQueueSelector() {
-    const select = document.getElementById("gpv-myqueue-select");
-    if (!select) return;
+  function initCustomQueueSelect() {
+    const root = document.getElementById("gpv-cselect");
+    const current = document.getElementById("gpv-cselect-current");
+    const list = document.getElementById("gpv-cselect-list");
 
-    const current = localStorage.getItem(STORAGE_MY_QUEUE) || "1.2";
+    if (!root || !current || !list) return;
 
-    // Строим список <option>
-    select.innerHTML = USER_QUEUES
-      .map(q => `<option value="${q}" ${q === current ? "selected" : ""}>${q}</option>`)
-      .join("");
+    let selected = localStorage.getItem(STORAGE_MY_QUEUE) || "1.2";
 
-    // обработчик выбора
-    select.onchange = () => {
-      localStorage.setItem(STORAGE_MY_QUEUE, select.value);
-      renderContent();
+    function renderList() {
+      current.firstChild.nodeValue = selected + " ";
+      list.innerHTML = USER_QUEUES.map(q => `
+        <div class="gpv-cselect-item ${q === selected ? "active" : ""}" data-q="${q}">
+          ${q}
+        </div>
+      `).join("");
+    }
+
+    renderList();
+
+    current.onclick = (e) => {
+      e.stopPropagation();
+      root.classList.toggle("open");
     };
+
+    list.onclick = (e) => {
+      const item = e.target.closest(".gpv-cselect-item");
+      if (!item) return;
+
+      selected = item.dataset.q;
+      localStorage.setItem(STORAGE_MY_QUEUE, selected);
+      root.classList.remove("open");
+
+      renderList();
+      renderContent(); // 🔥 перерисовываем график
+    };
+
+    document.addEventListener("click", () => {
+      root.classList.remove("open");
+    });
   }
+
 
   /**
    * Фильтруем строки графиков.
@@ -1587,7 +1676,7 @@
 
   //applyFonts();
   renderContent();
-  renderMyQueueSelector();
+  initCustomQueueSelect();
   applyVisibility();
 
   /* =========================================================
@@ -1621,15 +1710,15 @@
 
   // Когда вкладка получает фокус
   window.addEventListener("focus", () => {
-     showInstantLoader();
-     setTimeout(() => location.reload(), 120);
+    // showInstantLoader();
+    // setTimeout(() => location.reload(), 120);
   });
 
   // Когда возвращаемся из фона на Android/iOS
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-       showInstantLoader();
-       setTimeout(() => location.reload(), 120);
+      // showInstantLoader();
+      // setTimeout(() => location.reload(), 120);
     }
   });
 
