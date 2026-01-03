@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GPV parser group
+// @name         GPV parser сравнение по интервалам
 // @namespace    GPV parser
-// @version      3.1
+// @version      3.1.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -327,7 +327,18 @@
         intervals: [ lowered.includes("не вимикається") ? "не вимикається" : "не вимикаються" ],
         totalTime: "0 год. без світла",
         totalMinutes,
-        isBroken: false
+        isBroken: true
+      };
+    }
+
+    if (lowered.length === 0) {
+      return {
+        raw,
+        queues,
+        intervals: [], // в renderIntervalBlocks обработаеттся
+        totalTime: "0 год. без світла",
+        totalMinutes,
+        isBroken: true
       };
     }
 
@@ -358,11 +369,13 @@
         raw,
         queues,
         intervals: [ raw + "<span style=color:red;> !</span>" ],
+        intervalKey: "!BROKEN", // если интервалы кривые
         totalTime: "0 год. без світла",
         totalMinutes,
-        isBroken: true
+        isBroken: true // если строка кривая
       };
     }
+
 
     // === считаем время по строгой регулярке ===
     for (const iv of found) {
@@ -399,11 +412,25 @@
       }
     }
 
+    // intervalKey — НОРМАЛИЗОВАННАЯ СТРУКТУРА ИНТЕРВАЛОВ
+    // Используется ТОЛЬКО для сравнения версий графика.
+    // UI его НЕ использует.
+    // Важно: intervalKey может измениться даже если totalMinutes остался тем же.
+    const intervalKey = found
+      .map(iv =>
+        iv
+          .replace(/[–—]/g, "-")
+          .replace(/\s+/g, "")
+      )
+      .join("|");
+
+
     // === Возвращаем объект ===
     return {
       raw,
       queues,
-      intervals: found,    // интервал-строки как есть
+      intervals: found,
+      intervalKey,
       totalTime,
       totalMinutes,
       isBroken: false
@@ -477,18 +504,29 @@
       }
 
       // === собираем totalsByQueue ===
+      // totalsByQueue      — минуты отключений (для diff)
+      // intervalKeyByQueue — структура интервалов по очередям (для значимости версии)
+      // brokenByQueue      — кривая ли строка по очередям
       const totalsByQueue = {};
+      const intervalKeyByQueue = {};
+      const brokenByQueue = {};
+
       for (const r of b.rows) {
         for (const q of r.queues) {
           if (!totalsByQueue[q]) totalsByQueue[q] = 0;
           totalsByQueue[q] += r.totalMinutes;
+
+          intervalKeyByQueue[q] = r.intervalKey;
+          brokenByQueue[q] = r.isBroken;
         }
       }
 
       grouped[key].versions.push({
         headerClean: b.headerClean,
         rows: b.rows,
-        totalsByQueue
+        totalsByQueue,
+        intervalKeyByQueue,
+        brokenByQueue
       });
     }
 
@@ -498,6 +536,16 @@
     for (const key in grouped) {
       const group = grouped[key];
       const versions = group.versions;
+
+      // ОПРЕДЕЛЕНИЕ ЗНАЧИМОСТИ ВЕРСИИ
+      //
+      // Версия считается ЗНАЧИМОЙ, если:
+      // 1) изменилась структура интервалов (intervalKey)
+      // 2) строка кривая (isBroken === true)
+      // 3) произошёл переход кривая ↔ нормальная
+      //
+      // totalMinutes ЗДЕСЬ НЕ ИСПОЛЬЗУЕТСЯ!
+      // Он нужен ТОЛЬКО для diff в UI.
 
       // Для всех 1.1 → 6.2
       for (const queue of USER_QUEUES) {
@@ -512,12 +560,22 @@
           // если очереди нет в версии (так бывает редко)
           if (v.totalsByQueue[queue] === undefined) continue;
 
-          const cur = v.totalsByQueue[queue];
+          const curKey = v.intervalKeyByQueue[queue];
+          const curBroken = v.brokenByQueue[queue];
 
-          if (last === undefined || cur !== last) {
+          if (
+            last === undefined ||
+            curBroken === true ||
+            curKey !== last.intervalKey ||
+            curBroken !== last.broken
+          ) {
             arr.push(v);
-            last = cur;
+            last = {
+              intervalKey: curKey,
+              broken: curBroken
+            };
           }
+
         }
 
         arr.reverse();
@@ -592,41 +650,65 @@
    * queue         — "1.2"
    */
   function formatVersionDiff(versionsShown, allVersions, index, queue) {
-    const cur = versionsShown[index].totalsByQueue[queue];
+    const curV = versionsShown[index];
+    const cur = curV.totalsByQueue[queue];
     if (cur == null) return "";
 
-    let prev = null;
+    let prevV = null;
 
     // свернутый режим
     if (versionsShown.length === 1) {
       if (allVersions.length > 1) {
-        prev = allVersions[1]?.totalsByQueue[queue];
+        prevV = allVersions[1];
       }
     }
     // развернутый режим
     else {
       if (index + 1 < versionsShown.length) {
-        prev = versionsShown[index + 1].totalsByQueue[queue];
+        prevV = versionsShown[index + 1];
       }
     }
 
+    if (!prevV) return "";
+
+    const prev = prevV.totalsByQueue[queue];
     if (prev == null) return "";
 
     const diff = cur - prev;
-    if (diff === 0) return "";
+
+    // -------------------------------------------------
+    // totalMinutes используется ТОЛЬКО для diff
+    // intervalKey + isBroken определяют значимость версии
+    //
+    // (0:00) показываем ТОЛЬКО если:
+    // - время не изменилось
+    // - НО для этой очереди изменилась структура интервалов
+    //   или статус кривой строки
+    // -------------------------------------------------
+
+    if (diff === 0) {
+      const curKey     = curV.intervalKeyByQueue?.[queue];
+      const prevKey    = prevV.intervalKeyByQueue?.[queue];
+      const curBroken  = curV.brokenByQueue?.[queue];
+      const prevBroken = prevV.brokenByQueue?.[queue];
+
+      if (curKey !== prevKey || curBroken !== prevBroken) {
+        return ` <span style="color:#777; font-weight:600;">(0:00)</span>`;
+      }
+
+      return "";
+    }
 
     const sign = diff > 0 ? "+" : "−";
-    const color = diff > 0 ? "#d00000" : "#007431";  // + красный, − зелёный
+    const color = diff > 0 ? "#d00000" : "#007431";
 
     const d = Math.abs(diff);
     const h = Math.floor(d / 60);
     const m = d % 60;
-    const fm = `${h}:${m < 10 ? "0"+m : m}`;
+    const fm = `${h}:${m < 10 ? "0" + m : m}`;
 
     return ` <span style="color:${color}; font-weight:700;">(${sign}${fm})</span>`;
   }
-
-
 
 
 
