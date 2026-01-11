@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GPV parser сравнение по интервалам
+// @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.1.2
+// @version      3.1.3
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -54,6 +54,8 @@
     (s || "")
       .replace(/\u00A0/g, " ")
       .replace(/[–—]/g, "-")
+      .replace(/\Черга|з/gi, "") // для новой верситки сайта
+      .replace(/\до/gi, "-") // для новой верситки сайта
       .replace(/\s+/g, " ")
       .trim();
 
