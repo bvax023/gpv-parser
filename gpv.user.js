@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.1.4
+// @version      3.1.5
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -248,12 +248,11 @@
         if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
           monthIndex = MONTH_INDEX[monthName];
 
-          // Определяем корректный год с учётом перехода через Новый год
           let year = CURRENT_YEAR;
 
-          // Если сейчас январь (0), а месяц заголовка — декабрь (11) → прошлый год
-          if (monthIndex > TODAY.getMonth()) {
-            year = CURRENT_YEAR - 1;
+          // Сейчас декабрь, а в заголовке январь → следующий год
+          if (TODAY.getMonth() === 11 && monthIndex === 0) {
+            year = CURRENT_YEAR + 1;
           }
 
           const d = new Date(year, monthIndex, day);
