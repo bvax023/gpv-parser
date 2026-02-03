@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.1.5
+// @version      3.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -768,17 +768,9 @@
   gap:10px;
 }
 
-.gpv-divider {
-  width:1px;
-  height:22px;
-  background:#ccc;
-}
-
 .gpv-toggle {
-  display:flex;
-  align-items:center;
-  gap:6px;
-  font-size:14px;
+  margin-left: -3px;
+
 }
 
 .gpv-toggle-versions {
@@ -981,12 +973,7 @@
   const topbar = `
   <div class="gpv-topbar">
     <div class="gpv-menu-btn" id="gpv-menu-btn">☰</div>
-    <div class="gpv-right">
-      <label class="gpv-toggle">
-        <input type="checkbox" id="gpv-show-all">
-        Показати всі
-      </label>
-      <div class="gpv-divider"></div>
+      <div class="gpv-right">
         <label class="gpv-toggle">
           <input type="checkbox" id="gpv-myqueue">
           Моя черга
@@ -1022,6 +1009,12 @@
           </div>
           <div class="gpv-cselect-list" id="gpv-cselect-list"></div>
         </div>
+    </div>
+    <div class="gpv-font-row">
+      <label class="gpv-toggle">
+        <input type="checkbox" id="gpv-show-all">
+        Показати всі дати
+      </label>
     </div>
   </div>
   `;
