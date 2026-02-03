@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2
+// @version      3.2.1
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -769,6 +769,10 @@
 }
 
 .gpv-toggle {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:14px;
   margin-left: -3px;
 
 }
