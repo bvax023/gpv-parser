@@ -478,9 +478,9 @@
       // Если ни в одной из найденных строк (r.queues) нет текущей очереди q
       if (!rows.some(r => r.queues.includes(q))) {
         rows.push({
-          raw: `${q}: на сайті не знайдено графік для черги`,
+          raw: `${q}: не знайдено графік для черги`,
           queues: [q],
-          intervals: ["на сайті не знайдено графік для черги"],
+          intervals: ["не знайдено графік для черги"],
           intervalKey: "NOT_FOUND",
           totalTime: "0 год",
           totalMinutes: 0,
