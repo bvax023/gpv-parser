@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.3
+// @version      3.2.4
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -274,7 +274,7 @@
       if (updMatch) {
         // Нормализуем разделитель времени на двоеточие
         const timeStr = updMatch[1].replace("-", ":");
-        updatedPart = `(оновл. ${timeStr})`;
+        updatedPart = `(${timeStr})`;
       }
 
       // ===== 4) Собираем заголовок =====
