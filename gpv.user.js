@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.1
+// @version      3.2.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -472,6 +472,28 @@
       rows.push(parseRow(lines[k])); // передаем строку в parseRow()
       k++;
     }
+
+    // Если на сайте не все очереди, проверяем, каких очередей из USER_QUEUES не хватает в rows
+    USER_QUEUES.forEach(q => {
+      // Если ни в одной из найденных строк (r.queues) нет текущей очереди q
+      if (!rows.some(r => r.queues.includes(q))) {
+        rows.push({
+          raw: `${q}: на сайті не знайдено графік для черги`,
+          queues: [q],
+          intervals: ["на сайті не знайдено графік для черги"],
+          intervalKey: "NOT_FOUND",
+          totalTime: "0 год",
+          totalMinutes: 0,
+          isBroken: true
+        });
+      }
+    });
+
+    // Сортировки очередей по порядку
+    rows.sort((a, b) => {
+      // parseFloat от массива ["1.1"] вернет число 1.1      
+      return parseFloat(a.queues) - parseFloat(b.queues);
+    });
 
     blocks.push({
       headerRaw,
