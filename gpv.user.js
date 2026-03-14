@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.2
+// @version      3.2.5
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -1420,7 +1420,7 @@
       </style>
     `;
   }
-/*
+
   // Когда вкладка получает фокус
   window.addEventListener("focus", () => {
      showInstantLoader();
@@ -1434,5 +1434,5 @@
        setTimeout(() => location.reload(), 120);
     }
   });
-*/
+
 })();
