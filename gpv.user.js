@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.4
+// @version      3.2.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -193,112 +193,54 @@
     return html;
   }
 
-    /*
-     Ищет строку-заголовок графика выше первой строки с очередью.
-        - поднимается максимум на 10 строк вверх
-        - фильтрует слова которые в stopWords, не должны быть в заголовке
-        - парсим дату как "число + месяц" рядом
-        - вытаскиваем "(оновлено ...)", собираем заголовок: "число + месяц (оновлено время)"
-           либо только дату, либо только "(оновлено ...)"
-     Возвращаем объект:
-        {
-          headerRaw:   исходный текст заголовка,
-          headerClean: красивый заголовок "число + месяц (если есть, оновлено время)"
-          date:        Date с 00:00 или null (если дату не распознали)
-        }
-    */
 
-  function findHeader(lines, idx) {
-    // Значения по умолчанию (если ничего не найдём)
-    let headerRaw   = "ГПВ дата не розпізнана";
-    let headerClean = "ГПВ дата не розпізнана";
-    let date        = null;
+/*
+   * Парсинг заголовка (даты и времени обновления) из строки h2
+   */
+  function parseHeader(line) {
+    let headerRaw = line;
+    let headerClean = line;
+    let date = null;
 
-    // Ищем реальный заголовок над первой строкой графика
-    for (let j = idx - 1; j >= 0 && j >= idx - 10; j--) {
-      const line = lines[j];
-      const lower = line.toLowerCase();
+    // Ищем дату в строке h2
+    const upper = line.toUpperCase();
+    const dm = upper.match(/([0-3]?\d)\s+(СІЧНЯ|ЛЮТОГО|БЕРЕЗНЯ|КВІТНЯ|ТРАВНЯ|ЧЕРВНЯ|ЛИПНЯ|СЕРПНЯ|ВЕРЕСНЯ|ЖОВТНЯ|ЛИСТОПАДА|ГРУДНЯ)/);
 
-      // 1) Проверяем, песть ли в строке ГПВ
-      const isHeader =
-        lower.includes("гпв") &&
-        MONTHS_RE.test(line) &&
-        !stopWords.some(sw => lower.includes(sw));
+    let day = null;
+    let monthIndex = null;
 
-      if (!isHeader) continue;
+    if (dm) {
+      day = parseInt(dm[1], 10);
+      const monthName = dm[2];
 
-      // Считаем эту строку заголовком
-      headerRaw = line;
+      if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
+        monthIndex = MONTH_INDEX[monthName];
 
-      // ===== 2) Парсим дату: ИЩЕМ "ЧИСЛО + МЕСЯЦ" РЯДОМ =====
-      const upper = line.toUpperCase();
+        let year = CURRENT_YEAR;
+        if (TODAY.getMonth() === 11 && monthIndex === 0) year = CURRENT_YEAR + 1;
 
-      // Ищем "ЧИСЛО + МЕСЯЦ" рядом, без лишних
-      const dm = upper.match(
-        /([0-3]?\d)\s+(СІЧНЯ|ЛЮТОГО|БЕРЕЗНЯ|КВІТНЯ|ТРАВНЯ|ЧЕРВНЯ|ЛИПНЯ|СЕРПНЯ|ВЕРЕСНЯ|ЖОВТНЯ|ЛИСТОПАДА|ГРУДНЯ)/
-      );
-
-      let day = null;
-      let monthIndex = null;
-
-      if (dm) {
-        day = parseInt(dm[1], 10);
-        const monthName = dm[2];
-
-        if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
-          monthIndex = MONTH_INDEX[monthName];
-
-          let year = CURRENT_YEAR;
-
-          // Сейчас декабрь, а в заголовке январь → следующий год
-          if (TODAY.getMonth() === 11 && monthIndex === 0) {
-            year = CURRENT_YEAR + 1;
-          }
-
-          const d = new Date(year, monthIndex, day);
-          d.setHours(0, 0, 0, 0);
-          date = d;
-        } else {
-          date = null;
-        }
-      } else {
-        // Число и месяц не стоят рядом → дату не распознали
-        date = null;
+        const d = new Date(year, monthIndex, day);
+        d.setHours(0, 0, 0, 0);
+        date = d;
       }
+    }
 
-      // ===== 3) Вытаскиваем "(оновлено ...)" если есть =====
-      // Допускаем варианты: "(оновлено 13:45)", "(оновлено о 13:45)", "(оновлено 13-45)"
-      let updatedPart = "";
-      //const updMatch = line.match(/\(оновлено\s*(?:о|об)?\s*([0-2]?\d[:\-][0-5]\d)\)/i);
-      const updMatch = line.match(/\((?:оновлено\s*(?:о|об)?\s*)?([0-2]?\d[:\-][0-5]\d)\)/i);
-      if (updMatch) {
-        // Нормализуем разделитель времени на двоеточие
-        const timeStr = updMatch[1].replace("-", ":");
-        updatedPart = `(${timeStr})`;
-      }
+    // Вытаскиваем "(оновлено ...)"
+    let updatedPart = "";
+    const updMatch = line.match(/\((?:оновлено\s*(?:о|об)?\s*)?([0-2]?\d[:\-][0-5]\d)\)/i);
+    if (updMatch) {
+      updatedPart = `(${updMatch[1].replace("-", ":")})`;
+    }
 
-      // ===== 4) Собираем заголовок =====
-      if (date) {
-        // У нас есть валидная дата → "число + месяц" + опционально "(оновлено ...)"
-        const prettyDay   = day; // уже посчитали выше
-        const prettyMonth = MONTH_NAMES_GENITIVE[monthIndex];
-
-        if (updatedPart) {
-          headerClean = `${prettyDay} ${prettyMonth} ${updatedPart}`;
-        } else {
-          headerClean = `${prettyDay} ${prettyMonth}`;
-        }
-      } else if (updatedPart) {
-        // Дату не смогли распознать, но есть "(оновлено ...)"
-        // → показываем только это
-        headerClean = updatedPart;
-      } else {
-        // Ни даты, ни "(оновлено ...)" — оставляем исходный текст
-        headerClean = headerRaw;
-      }
-
-      // Мы нашли нужный заголовок — выходим из цикла
-      break;
+    // Собираем красивый заголовок
+    if (date) {
+      const prettyDay = day;
+      const prettyMonth = MONTH_NAMES_GENITIVE[monthIndex];
+      headerClean = updatedPart ? `${prettyDay} ${prettyMonth} ${updatedPart}` : `${prettyDay} ${prettyMonth}`;
+    } else if (updatedPart) {
+      headerClean = updatedPart;
+    } else {
+      headerClean = headerRaw;
     }
 
     return { headerRaw, headerClean, date };
@@ -444,67 +386,86 @@
   /* =========================================================
    * 6. ЗАГРУЗКА И ПРЕОБРАЗОВАНИЕ HTML С САЙТА
    * ======================================================= */
-
-  // Тянем оригинальную страницу (без #gpv)
   const res = await fetch(location.href.replace("#gpv", ""), { credentials: "include" });
   const htmlText = await res.text();
   const tmp = document.createElement("div");
   tmp.innerHTML = htmlText;
-  const lines = tmp.innerText.split("\n").map(norm).filter(Boolean);
 
   /* =========================================================
-   * 7. ПАРСИНГ БЛОКОВ (ГРАФИКИ ПО ДНЯМ)
+   * 7. ПАРСИНГ БЛОКОВ (ГРАФИКИ ПО ДНЯМ) - НОВАЯ ВЕРСТКА
    * ======================================================= */
-  //let DateNullIndexBlocks = -1; // минимальный blocks[index] с date = null
   const blocks = [];
-    for (let i = 0; i < lines.length; i++) {
-    if (!rowRe.test(lines[i])) continue; // rowRe регулярка для строки с очередью
-    // if (blocks.length >= 10) break;  // количесво найденых блоков
+  const articles = tmp.querySelectorAll("article"); // Берем все блоки графиков
 
-    // если строка прошла регулярку очереди, это первая строка графика findHeader() ищет и возвращает заголовок
-    const { headerRaw, headerClean, date } = findHeader(lines, i);
+  for (const article of articles) {
+    const h2 = article.querySelector("h2");
+    const contentDiv = article.querySelector(".content");
 
+    if (!h2 || !contentDiv) continue; // Если структура другая, пропускаем
+
+    // 1. Обрабатываем заголовок
+    const h2Text = norm(h2.innerText);
+    const { headerRaw, headerClean, date } = parseHeader(h2Text);
+
+    // 2. Обрабатываем контент внутри
+    const contentLines = contentDiv.innerText.split("\n").map(norm).filter(Boolean);
     const rows = [];
-    let k = i;
+    let hasQueues = false;
+    const textMessages = [];
 
-    // собираем строки которые подряд и проходят регулярку rowRe, собираем блок графика
-    while (k < lines.length && rowRe.test(lines[k])) {
-      rows.push(parseRow(lines[k])); // передаем строку в parseRow()
-      k++;
+    // 3. Перебираем строки в поисках расписания
+    for (const line of contentLines) {
+      if (rowRe.test(line)) {
+        // Нашли строку с очередью (например "1.1: 18:30 - 22:30")
+        rows.push(parseRow(line)); // Ваша функция парсинга остается без изменений!
+        hasQueues = true;
+      } else if (line.length > 10) {
+        // Собираем длинные текстовые строки на случай, если расписания нет
+        textMessages.push(line);
+      }
     }
 
-    // Если на сайте не все очереди, проверяем, каких очередей из USER_QUEUES не хватает в rows
-    USER_QUEUES.forEach(q => {
-      // Если ни в одной из найденных строк (r.queues) нет текущей очереди q
-      if (!rows.some(r => r.queues.includes(q))) {
-        rows.push({
-          raw: `${q}: не знайдено графік для черги`,
-          queues: [q],
-          intervals: ["не знайдено графік для черги"],
-          intervalKey: "NOT_FOUND",
-          totalTime: "0 год",
-          totalMinutes: 0,
-          isBroken: true
-        });
-      }
-    });
+    // 4. Логика для блоков без очередей ("ГПВ скасовано")
+    if (!hasQueues && textMessages.length > 0) {
+      const msg = textMessages.join(" ");
+      rows.push({
+        raw: msg,
+        queues: USER_QUEUES, // Привязываем ко всем очередям сразу
+        intervals: [msg],
+        intervalKey: "MESSAGE",
+        totalTime: "0 год.",
+        totalMinutes: 0,
+        isBroken: true // isBroken: true выведет текст в красивом желтом блоке
+      });
+    } else if (hasQueues) {
+      // 5. Если очереди есть, проверяем, каких не хватает (ваша старая логика)
+      USER_QUEUES.forEach(q => {
+        if (!rows.some(r => r.queues.includes(q))) {
+          rows.push({
+            raw: `${q}: не знайдено графік для черги`,
+            queues: [q],
+            intervals: ["не знайдено графік для черги"],
+            intervalKey: "NOT_FOUND",
+            totalTime: "0 год.",
+            totalMinutes: 0,
+            isBroken: true
+          });
+        }
+      });
+    }
 
-    // Сортировки очередей по порядку
-    rows.sort((a, b) => {
-      // parseFloat от массива ["1.1"] вернет число 1.1      
-      return parseFloat(a.queues) - parseFloat(b.queues);
-    });
+    // Сортировка очередей по порядку
+    rows.sort((a, b) => parseFloat(a.queues[0] || 0) - parseFloat(b.queues[0] || 0));
 
+    // Добавляем готовый блок
     blocks.push({
       headerRaw,
       headerClean,
       date,
       rows
     });
-
-    i = k - 1; // перепрыгиваем через собраные строки, что бы for заново в них не искал
   }
-  //console.log("blocks = ",blocks);
+
 
   /* =========================================================
  * ГРУППИРУЕМ ВСЕ БЛОКИ В НОВУЮ АРХИТЕКТУРУ block.moreVersions
@@ -668,13 +629,6 @@
   //console.log("todayGroup =", todayGroup);
   //console.log("tomorrowGroup =", tomorrowGroup);
 
-    /**
-   * Вычисляет разницу totalMinutes для очереди queue.
-   * versionsShown — то, что рендерится (значимые или одна версия)
-   * allVersions   — полный список версий (group.versions)
-   * index         — индекс текущей версии в versionsShown
-   * queue         — "1.2"
-   */
   function formatVersionDiff(versionsShown, allVersions, index, queue) {
     const curV = versionsShown[index];
     const cur = curV.totalsByQueue[queue];
@@ -682,17 +636,10 @@
 
     let prevV = null;
 
-    // свернутый режим
     if (versionsShown.length === 1) {
-      if (allVersions.length > 1) {
-        prevV = allVersions[1];
-      }
-    }
-    // развернутый режим
-    else {
-      if (index + 1 < versionsShown.length) {
-        prevV = versionsShown[index + 1];
-      }
+      if (allVersions.length > 1) prevV = allVersions[1];
+    } else {
+      if (index + 1 < versionsShown.length) prevV = versionsShown[index + 1];
     }
 
     if (!prevV) return "";
@@ -701,30 +648,26 @@
     if (prev == null) return "";
 
     const diff = cur - prev;
+    const curKey = curV.intervalKeyByQueue?.[queue];
+    const prevKey = prevV.intervalKeyByQueue?.[queue];
 
-    // -------------------------------------------------
-    // totalMinutes используется ТОЛЬКО для diff
-    // intervalKey + isBroken определяют значимость версии
-    //
-    // (0:00) показываем ТОЛЬКО если:
-    // - время не изменилось
-    // - НО для этой очереди изменилась структура интервалов
-    //   или статус кривой строки
-    // -------------------------------------------------
-
+    // Якщо час не змінився (наприклад, було 0 годин і стало 0 годин)
     if (diff === 0) {
-      const curKey     = curV.intervalKeyByQueue?.[queue];
-      const prevKey    = prevV.intervalKeyByQueue?.[queue];
       const curBroken  = curV.brokenByQueue?.[queue];
       const prevBroken = prevV.brokenByQueue?.[queue];
 
+      // Якщо змінилася структура рядка (був графік, став текст і т.д.)
       if (curKey !== prevKey || curBroken !== prevBroken) {
+        // Ховаємо сіре (0:00) тільки для текстових блоків та відсутніх черг
+        if (curKey === "MESSAGE" || curKey === "NOT_FOUND" || prevKey === "NOT_FOUND") {
+          return "";
+        }
         return ` <span style="color:#777; font-weight:600;">(0:00)</span>`;
       }
-
       return "";
     }
 
+    // Якщо різниця Є (було 3 години, графік скасували = стало 0) — показуємо!
     const sign = diff > 0 ? "+" : "−";
     const color = diff > 0 ? "#d00000" : "#007431";
 
@@ -735,6 +678,8 @@
 
     return ` <span style="color:${color}; font-weight:700;">(${sign}${fm})</span>`;
   }
+
+
 
 
 
@@ -979,6 +924,8 @@
   font-size:15px;
   white-space:nowrap;
   box-shadow: 0 0 5px #ddd;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ===== interval status ===== */
@@ -1102,7 +1049,7 @@
         html += `
           <div class="gpb-row ${queueClasses}">
             <div class="gpb-row-summary">
-              <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
+              <span class="gpv-queue-tag">${r.queues.length === 12 ? "Всі черги" : r.queues.join(", ")}</span>
               <span class="gpv-total"> - ${r.totalTime}</span>
             </div>
             ${renderIntervalBlocks(r.intervals, b.date, r.isBroken)}
@@ -1191,18 +1138,29 @@
         let queueClasses = "";
         for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
 
-        const q = r.queues[0]; // фактически в строке одна очередь
+        // Шукаємо, для якої черги рахувати різницю
+        let targetQueue = r.queues[0];
+        const cbMy = document.getElementById("gpv-myqueue");
+
+        // Якщо включена "Моя черга", беремо саме її для точного підрахунку
+        if (cbMy && cbMy.checked) {
+          const selectedQueue = localStorage.getItem("gpv_myqueue_selected") || "1.2";
+          if (r.queues.includes(selectedQueue)) {
+            targetQueue = selectedQueue;
+          }
+        }
+
         const diffHTML = formatVersionDiff(
           versionsToShow,
-          versions,       // полный список версий
+          versions,
           vIndex,
-          q
+          targetQueue
         );
 
         html += `
           <div class="gpb-row ${queueClasses}">
             <div class="gpb-row-summary">
-              <span class="gpv-queue-tag">${r.queues.join(", ")}</span>
+              <span class="gpv-queue-tag">${r.queues.length === 12 ? "Всі черги" : r.queues.join(", ")}</span>
               <span class="gpv-total"> - ${r.totalTime}${diffHTML}</span>
             </div>
             ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
@@ -1462,7 +1420,7 @@
       </style>
     `;
   }
-
+/*
   // Когда вкладка получает фокус
   window.addEventListener("focus", () => {
      showInstantLoader();
@@ -1476,5 +1434,5 @@
        setTimeout(() => location.reload(), 120);
     }
   });
-
+*/
 })();
