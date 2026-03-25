@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.5
+// @version      3.2.6
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/*
 // @run-at       document-start
@@ -405,7 +405,35 @@
 
     // 1. Обрабатываем заголовок
     const h2Text = norm(h2.innerText);
-    const { headerRaw, headerClean, date } = parseHeader(h2Text);
+    // ВАЖНО: меняем const на let, чтобы мы могли перезаписать date и headerClean
+    let { headerRaw, headerClean, date } = parseHeader(h2Text);
+
+    // === ДОБАВЛЕНО: Если в h2 нет даты, ищем её внутри <div class="content"> ===
+    if (!date) {
+      const contentTextUpper = norm(contentDiv.innerText).toUpperCase();
+      const dm = contentTextUpper.match(/([0-3]?\d)\s+(СІЧНЯ|ЛЮТОГО|БЕРЕЗНЯ|КВІТНЯ|ТРАВНЯ|ЧЕРВНЯ|ЛИПНЯ|СЕРПНЯ|ВЕРЕСНЯ|ЖОВТНЯ|ЛИСТОПАДА|ГРУДНЯ)/);
+
+      if (dm) {
+        const day = parseInt(dm[1], 10);
+        const monthName = dm[2];
+
+        if (!isNaN(day) && day >= 1 && day <= 31 && monthName in MONTH_INDEX) {
+          const monthIndex = MONTH_INDEX[monthName];
+          let year = CURRENT_YEAR;
+
+          // Учитываем переход на новый год (если сейчас декабрь, а график на январь)
+          if (TODAY.getMonth() === 11 && monthIndex === 0) year = CURRENT_YEAR + 1;
+
+          const d = new Date(year, monthIndex, day);
+          d.setHours(0, 0, 0, 0);
+          date = d; // Перезаписываем null на найденную дату
+
+          // Дописываем найденную дату в начало заголовка, чтобы это красиво выглядело в UI
+          const prettyMonth = MONTH_NAMES_GENITIVE[monthIndex];
+          headerClean = `${day} ${prettyMonth} ${headerClean}`;
+        }
+      }
+    }
 
     // 2. Обрабатываем контент внутри
     const contentLines = contentDiv.innerText.split("\n").map(norm).filter(Boolean);
