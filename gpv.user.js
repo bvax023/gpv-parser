@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.2.6
+// @version      3.2.7
 // @description  Парсинг графіка ГПВ
-// @match        https://www.zoe.com.ua/*
+// @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -23,6 +23,10 @@
   /* =========================================================
    * РЕЖИМ #gpv — чтобы не ломать обычный сайт
    * ======================================================= */
+
+  const hideStyle = document.createElement('style');
+  hideStyle.innerHTML = 'html { display: none !important; }';
+  document.documentElement.appendChild(hideStyle);
 
   if (!location.hash.includes("gpv")) {
     location.replace(location.pathname + location.search + "#gpv");
