@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      5.2
+// @version      1.2
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -403,9 +403,23 @@
     if (!h2 || !contentDiv) continue; // Если структура другая, пропускаем
 
     // 1. Обрабатываем заголовок
-    const h2Text = norm(h2.innerText);
-    // ВАЖНО: меняем const на let, чтобы мы могли перезаписать date и headerClean
-    let { headerRaw, headerClean, date } = parseHeader(h2Text);
+    let headerRaw, headerClean, date;
+
+    const h2RawText = h2.innerText.trim();
+
+    if (!contentDiv || (!contentDiv.textContent.trim() && contentDiv.children.length === 0)) { // если div content пустой, заголовок оставляем как есть не только дату
+      headerRaw = h2RawText;
+      headerClean = h2RawText;
+
+      // но дату всё равно пытаемся вытащить
+      const parsed = parseHeader(h2RawText);
+      date = parsed.date;
+
+    } else {
+      // обычная логика, оставляем в заголовке только дату
+      const h2Text = norm(h2.innerText);
+      ({ headerRaw, headerClean, date } = parseHeader(h2Text));
+    }
 
     // === ДОБАВЛЕНО: Если в h2 нет даты, ищем её внутри <div class="content"> ===
     if (!date) {
