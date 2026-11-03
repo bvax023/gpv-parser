@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      1.2
+// @version      3.2.6
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -53,7 +53,7 @@
     (s || "")
       .replace(/\u00A0/g, " ")
       .replace(/[–—]/g, "-")
-      .replace(/\Черга|Черги/gi, "") // для новой верситки сайта
+      .replace(/⚡\uFE0F?/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -449,22 +449,65 @@
     }
 
     // 2. Обрабатываем контент внутри
-    const contentLines = contentDiv.innerText.split("\n").map(norm).filter(Boolean);
-    const rows = [];
-    let hasQueues = false;
-    const textMessages = [];
+    // 2. Обрабатываем контент внутри
+const contentLines = [];
+const paragraphs = contentDiv.querySelectorAll("p");
 
-    // 3. Перебираем строки в поисках расписания
-    for (const line of contentLines) {
-      if (rowRe.test(line)) {
-        // Нашли строку с очередью (например "1.1: 18:30 - 22:30")
-        rows.push(parseRow(line)); // Ваша функция парсинга остается без изменений!
-        hasQueues = true;
-      } else if (line.length > 10) {
-        // Собираем длинные текстовые строки на случай, если расписания нет
-        textMessages.push(line);
-      }
+// Обрабатываем каждый абзац отдельно
+if (paragraphs.length > 0) {
+    for (const p of paragraphs) {
+
+        const paragraphLines = p.innerText
+            .split("\n")
+            .map(norm)
+            .filter(Boolean);
+
+        if (paragraphLines.length === 0) continue;
+
+        // Проверяем, начинается ли абзац с заголовка очереди
+        const queueMatch = paragraphLines[0].match(
+            /^Черга\s*([1-6]\.[12])\s*$/i
+        );
+
+        if (queueMatch) {
+
+            // Объединяем интервалы этой очереди в одну строку
+            const intervals = paragraphLines.slice(1);
+
+            contentLines.push(
+                `${queueMatch[1]}: ${intervals.join(" ")}`
+            );
+
+        } else {
+
+            // Старую верстку оставляем построчно
+            contentLines.push(...paragraphLines);
+
+        }
     }
+
+} else {
+
+    // Резервная обработка, если абзацев нет
+    contentLines.push(
+        ...contentDiv.innerText.split("\n").map(norm).filter(Boolean)
+    );
+
+}
+
+const rows = [];
+let hasQueues = false;
+const textMessages = [];
+
+// 3. Перебираем строки в поисках расписания
+for (const line of contentLines) {
+    if (rowRe.test(line)) {
+        rows.push(parseRow(line));
+        hasQueues = true;
+    } else if (line.length > 10) {
+        textMessages.push(line);
+    }
+}
 
     // 4. Логика для блоков без очередей ("ГПВ скасовано")
     if (!hasQueues && textMessages.length > 0) {
@@ -645,10 +688,10 @@
     return false;
   }
 
-  //console.log(hasCriticalNullDates(blocks))
+  console.log(hasCriticalNullDates(blocks))
 
   const groupedByDate = buildGroupedByDate(blocks);
-  //console.log("groupedByDate =", groupedByDate);
+  console.log("groupedByDate =", groupedByDate);
 
     /* =========================================================
    * ВЫБИРАЕМ ГРУППЫ НА СЕГОДНЯ И НА ЗАВТРА
