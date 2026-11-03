@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.3.5
+// @version      3.3.6
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -401,6 +401,7 @@
     const contentDiv = article.querySelector(".content");
 
     if (!h2 || !contentDiv) continue; // Если структура другая, пропускаем
+    if (!h2.textContent.trim() && !contentDiv.textContent.trim()) continue; // Если h2 заголовок и div пустые, пропускаем
 
     // 1. Обрабатываем заголовок
     let headerRaw, headerClean, date;
