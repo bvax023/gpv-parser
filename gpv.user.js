@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.5.0
+// @version      3.5.1
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -343,9 +343,9 @@
           const inactiveClass = isInactive ? " gpv-interval-inactive" : "";
 
           if (item.type === "added") {
-            html += `<div class="gpv-interval-block gpv-interval-added${inactiveClass}">+ ${item.text}</div>`;
+            html += `<div class="gpv-interval-block gpv-interval-added${inactiveClass}">+${item.text}</div>`;
           } else if (item.type === "removed") {
-            html += `<div class="gpv-interval-block gpv-interval-removed${inactiveClass}">− ${item.text}</div>`;
+            html += `<div class="gpv-interval-block gpv-interval-removed${inactiveClass}">−${item.text}</div>`;
           } else {
           let status = "";
 
