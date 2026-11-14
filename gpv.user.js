@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.3.6
+// @version      3.3.7
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -113,6 +113,144 @@
    * ФУНКЦИИ
    * ======================================================= */
 
+
+  // Переводит интервал времени в минуты от начала суток.
+  function parseIntervalForDiff(interval) {
+    const m = String(interval).match(STRICT_INTERVAL_RE);
+    if (!m) return null;
+
+    const start = Number(m[1]) * 60 + Number(m[2]);
+    const end = Number(m[3]) * 60 + Number(m[4]);
+
+    if (start < 0 || start > 1440 || end < start || end > 1440) {
+      return null;
+    }
+
+    return { start, end };
+  }
+
+  // Форматирует минуты обратно в HH:MM.
+  function formatTimeForDiff(minutes) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+
+  // Вычитает интервалы покрытия.
+  // Например: 05:30–10:30 минус 06:30–10:30 = 05:30–06:30.
+  function subtractIntervals(source, cover) {
+    let result = [];
+
+    for (const sourceInterval of source) {
+      let parts = [sourceInterval];
+
+      for (const coverInterval of cover) {
+        const nextParts = [];
+
+        for (const part of parts) {
+          if (
+            coverInterval.end <= part.start ||
+            coverInterval.start >= part.end
+          ) {
+            nextParts.push(part);
+            continue;
+          }
+
+          if (coverInterval.start > part.start) {
+            nextParts.push({
+              start: part.start,
+              end: coverInterval.start
+            });
+          }
+
+          if (coverInterval.end < part.end) {
+            nextParts.push({
+              start: coverInterval.end,
+              end: part.end
+            });
+          }
+        }
+
+        parts = nextParts;
+      }
+
+      result.push(...parts);
+    }
+
+    return result
+      .filter(part => part.end > part.start)
+      .sort((a, b) => a.start - b.start)
+      .map(part =>
+        `${formatTimeForDiff(part.start)} – ${formatTimeForDiff(part.end)}`
+      );
+  }
+
+  // Получает интервалы строки для сравнения.
+  function getIntervalsForDiff(row) {
+    if (!row || row.isBroken) return null;
+
+    const text = (row.intervals || []).join(" ").toLowerCase();
+
+    if (
+      text.includes(NO_POWER_SINGLE) ||
+      text.includes(NO_POWER_PLURAL)
+    ) {
+      return [];
+    }
+
+    const result = [];
+
+    for (const interval of row.intervals || []) {
+      const parsed = parseIntervalForDiff(interval);
+      if (!parsed) return null;
+      result.push(parsed);
+    }
+
+    return result;
+  }
+
+  // Сравнивает текущую строку с предыдущей публикацией.
+  function getIntervalChanges(currentRow, previousVersion) {
+    if (!currentRow || !previousVersion) return null;
+
+    const current = getIntervalsForDiff(currentRow);
+    if (current === null) return null;
+
+    const previousRows = currentRow.queues.map(queue =>
+      previousVersion.rows.find(row => row.queues.includes(queue))
+    );
+
+    if (!previousRows.length || previousRows.some(row => !row)) {
+      return null;
+    }
+
+    const previous = previousRows.map(getIntervalsForDiff);
+
+    if (previous.some(intervals => intervals === null)) {
+      return null;
+    }
+
+    // Если строка объединяет несколько очередей с разными графиками,
+    // не пытаемся вычислять общую разницу.
+    const first = previous[0];
+
+    for (const other of previous.slice(1)) {
+      const a = first.map(x => `${x.start}-${x.end}`).sort();
+      const b = other.map(x => `${x.start}-${x.end}`).sort();
+
+      if (a.length !== b.length || a.some((x, i) => x !== b[i])) {
+        return null;
+      }
+    }
+
+    return {
+      added: subtractIntervals(current, first),
+      removed: subtractIntervals(first, current)
+    };
+  }
+
+
   /**
    * renderIntervalBlocks(intervals, blockDate)
    *  - рисует "карточки" интервалов для одной очереди
@@ -120,77 +258,126 @@
    *  - старые даты (blockDate < TODAY) полностью серые
    *  - isBroken = true parseRow() не распарсила интервалы, значит в интервале ошибка
    */
-  function renderIntervalBlocks(intervals, blockDate, isBroken) {
-    // График полностью прошлый?
+
+  function renderIntervalBlocks(intervals, blockDate, isBroken, changes = null) {
     const isPastGraph = blockDate && blockDate < TODAY;
     const joined = intervals.join(" ").toLowerCase();
 
-    // Спец-случаи без интервалов
-    if (joined.includes(NO_POWER_SINGLE)) {
-      return `
-        <div class="gpv-interval-row">
-          <div class="gpv-interval-block ${isPastGraph ? "gpv-interval-past" : ""}">${NO_POWER_SINGLE}</div>
-        </div>
-      `;
-    }
-    if (joined.includes(NO_POWER_PLURAL)) {
-      return `
-        <div class="gpv-interval-row">
-          <div class="gpv-interval-block ${isPastGraph ? "gpv-interval-past" : ""}">${NO_POWER_PLURAL}</div>
-        </div>
-      `;
-    }
-
-    if (intervals.length === 0) {
-      return `
-        <div class="gpv-interval-row">
-          <div class="gpv-interval-block ${isPastGraph ? "gpv-interval-past" : ""}">не знайдено</div>
-        </div>
-      `;
-    }
-
     let html = '<div class="gpv-interval-row">';
 
-    for (let iv of intervals) {
+    // Специальные случаи без интервалов.
+    if (
+      joined.includes(NO_POWER_SINGLE) ||
+      joined.includes(NO_POWER_PLURAL)
+    ) {
+      const phrase = joined.includes(NO_POWER_SINGLE)
+        ? NO_POWER_SINGLE
+        : NO_POWER_PLURAL;
 
-      // Старый график → все интервалы серые
-      if (isPastGraph) {
-        html += `<div class="gpv-interval-block gpv-interval-past">${iv}</div>`;
-        continue;
+      html += `<div class="gpv-interval-block ${isPastGraph ? "gpv-interval-past" : ""}">${phrase}</div>`;
+    } else if (intervals.length === 0) {
+      html += `<div class="gpv-interval-block ${isPastGraph ? "gpv-interval-past" : ""}">не знайдено</div>`;
+    } else if (isBroken || isPastGraph || (blockDate && blockDate > TODAY) || !changes) {
+      // Для старых дат, некорректных строк и графиков без сравнения
+      // оставляем прежнее отображение.
+      for (const iv of intervals) {
+        let status = "";
+
+        if (isPastGraph) {
+          status = "gpv-interval-past";
+        } else if (!isBroken && blockDate && blockDate.getTime() === TODAY.getTime()) {
+          const m = iv.match(STRICT_INTERVAL_RE);
+
+          if (m) {
+            const end = new Date(TODAY);
+            end.setHours(+m[3], +m[4], 0, 0);
+
+            if (NOW > end) status = "gpv-interval-past";
+          }
+        }
+
+        html += `<div class="gpv-interval-block ${status}">${iv}</div>`;
       }
+    } else {
+      const currentParsed = intervals
+        .map(parseIntervalForDiff)
+        .filter(Boolean);
 
-      // График на завтра → все интервалы "будущие", без серого
-      if (blockDate && blockDate > TODAY) {
-        html += `<div class="gpv-interval-block">${iv}</div>`;
-        continue;
+      const addedParsed = changes.added
+        .map(parseIntervalForDiff)
+        .filter(Boolean);
+
+      // Неизменившиеся части текущего графика.
+      const normal = subtractIntervals(currentParsed, addedParsed);
+
+      const items = [
+        ...normal.map(iv => ({ text: iv, type: "normal" })),
+        ...changes.added.map(iv => ({ text: iv, type: "added" })),
+        ...changes.removed.map(iv => ({ text: iv, type: "removed" }))
+      ];
+
+      // Сортируем по времени начала.
+      items.sort((a, b) => {
+        const ia = parseIntervalForDiff(a.text);
+        const ib = parseIntervalForDiff(b.text);
+        return ia.start - ib.start;
+      });
+
+      for (const item of items) {
+          // Проверяем, закончилось ли время интервала.
+          const m = item.text.match(STRICT_INTERVAL_RE);
+          let isInactive = false;
+
+          if (m) {
+            // График прошедшей даты — все интервалы неактивны.
+            if (blockDate && blockDate < TODAY) {
+              isInactive = true;
+            } else if (blockDate && blockDate.toDateString() === TODAY.toDateString()) {
+              const end = new Date(blockDate);
+              end.setHours(+m[3], +m[4], 0, 0);
+
+              isInactive = NOW > end;
+            }
+          }
+
+          const inactiveClass = isInactive ? " gpv-interval-inactive" : "";
+
+          if (item.type === "added") {
+            html += `<div class="gpv-interval-block gpv-interval-added${inactiveClass}">+ ${item.text}</div>`;
+          } else if (item.type === "removed") {
+            html += `<div class="gpv-interval-block gpv-interval-removed${inactiveClass}">− ${item.text}</div>`;
+          } else {
+          let status = "";
+
+          const m = item.text.match(STRICT_INTERVAL_RE);
+          if (m) {
+            const end = new Date(TODAY);
+            end.setHours(+m[3], +m[4], 0, 0);
+
+            if (NOW > end) status = "gpv-interval-past";
+          }
+
+          html += `<div class="gpv-interval-block ${status}">${item.text}</div>`;
+        }
       }
+    }
 
-      // Обычная логика на сегодня
-      const m = iv.match(STRICT_INTERVAL_RE); // регулярка интервалов времени
-      if (!m || isBroken) {
-        // Неполные/кривые интервалы: просто показываем как есть, без подсветки прошедшего
-        html += `<div class="gpv-interval-block">${iv}</div>`;
-        continue;
+    // Если в текущем графике нет интервалов, но они были раньше,
+    // показываем их как удалённые.
+    if (
+      changes &&
+      intervals.length === 0 &&
+      changes.removed.length > 0
+    ) {
+      for (const iv of changes.removed) {
+        html += `<div class="gpv-interval-block gpv-interval-removed">− ${iv}</div>`;
       }
-
-      const sh = +m[1], sm = +m[2];
-      const eh = +m[3], em = +m[4];
-
-      const start = new Date(TODAY);
-      start.setHours(sh, sm, 0, 0);
-
-      const end = new Date(TODAY);
-      end.setHours(eh, em, 0, 0);
-
-      let status = "";
-      if (NOW > end) status = "gpv-interval-past";
-
-      html += `<div class="gpv-interval-block ${status}">${iv}</div>`;
     }
 
     html += "</div>";
     return html;
   }
+
 
 
 /*
@@ -978,6 +1165,39 @@
   box-shadow: none !important;
 }
 
+/* Добавленные участки времени */
+.gpv-interval-added {
+  color: #b00020 !important;
+  background: #fde3e5 !important;
+  border-color: #e2a0a5 !important;
+  font-weight: 700;
+}
+
+/* Прошедшие добавленные интервалы — приглушённый красный */
+.gpv-interval-added.gpv-interval-inactive {
+  color: #a17b7e !important;
+  background: #f1e9e9 !important;
+  border-color: #dfd0d1 !important;
+}
+
+.gpv-interval-removed,
+.gpv-interval-removed.gpv-interval-inactive {
+  color: #a0b9a5 !important;
+  background: #f1f7f2 !important;
+  border-color: #dce9de !important;
+  font-weight: 700 !important;
+  text-decoration: line-through;
+  text-decoration-color: #a0b9a5;
+  box-shadow: none !important;
+}
+
+.gpb-block:not(.gpv-old-version) .gpv-interval-removed:not(.gpv-interval-inactive) {
+  background: #e1f2e5 !important;
+  border-color: #9bc9a7 !important;
+  color: #087a35 !important;
+  text-decoration-color: #087a35 !important;
+}
+
 /* ======= Hidden for filters ======= */
 .gpv-hidden {
   display:none!important;
@@ -1084,8 +1304,23 @@
       `;
 
       // ===== строки очередей =====
+      let previousVersion = null;
+
+      if (b.date) {
+        const dateKey = b.date.toISOString().slice(0, 10);
+        const allVersions = groupedByDate[dateKey]?.versions || [];
+
+        const currentIndex = allVersions.findIndex(
+          version => version.rows === b.rows
+        );
+
+        if (currentIndex >= 0) {
+          previousVersion = allVersions[currentIndex + 1] || null;
+        }
+      }
       for (const r of b.rows) {
         let queueClasses = "";
+        const intervalChanges = getIntervalChanges(r, previousVersion);
         for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
 
         html += `
@@ -1094,7 +1329,7 @@
               <span class="gpv-queue-tag">${r.queues.length === 12 ? "Всі черги" : r.queues.join(", ")}</span>
               <span class="gpv-total"> - ${r.totalTime}</span>
             </div>
-            ${renderIntervalBlocks(r.intervals, b.date, r.isBroken)}
+            ${renderIntervalBlocks(r.intervals, b.date, r.isBroken, intervalChanges)}
           </div>
         `;
       }
@@ -1147,6 +1382,12 @@
       // ПЕРЕБОР ВЕРСИЙ
       for (let vIndex = 0; vIndex < versionsToShow.length; vIndex++) {
         const version = versionsToShow[vIndex];
+        // Ищем предыдущую публикацию в полном списке версий,
+        // а не в отфильтрованном perQueueVersions.
+        const actualVersionIndex = group.versions.indexOf(version);
+        const previousVersion = actualVersionIndex >= 0
+          ? group.versions[actualVersionIndex + 1] || null
+          : null;
 
         // Цвет заголовка: завтра/прошлое/сегодня
         let headerClass = "";
@@ -1177,6 +1418,7 @@
 
         // ==== СТРОКИ ОЧЕРЕДЕЙ ====
         for (const r of version.rows) {
+        const intervalChanges = getIntervalChanges(r, previousVersion);
         let queueClasses = "";
         for (const q of r.queues) queueClasses += " queue-" + q.replace(".", "-");
 
@@ -1205,7 +1447,7 @@
               <span class="gpv-queue-tag">${r.queues.length === 12 ? "Всі черги" : r.queues.join(", ")}</span>
               <span class="gpv-total"> - ${r.totalTime}${diffHTML}</span>
             </div>
-            ${renderIntervalBlocks(r.intervals, group.date, r.isBroken)}
+            ${renderIntervalBlocks(r.intervals, group.date, r.isBroken, intervalChanges)}
           </div>
         `;
       }
