@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.3.7
+// @version      3.5.0
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -1196,6 +1196,12 @@
   border-color: #9bc9a7 !important;
   color: #087a35 !important;
   text-decoration-color: #087a35 !important;
+}
+
+.gpv-interval-added,
+.gpv-interval-removed {
+    padding-left: 5px;
+    padding-right: 5px;
 }
 
 /* ======= Hidden for filters ======= */
