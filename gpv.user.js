@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.5.2
+// @version      3.5.3
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -809,27 +809,17 @@
   }
 
 
-    /**
-   * если среди всех blocks есть block.date === null,
-   * и такой блок идёт в графиках НЕ раньше чем TODAY - 2 дня.
-   *
-   * Если такие null-даты существуют, показываем все
-   */
-  function hasCriticalNullDates(blocks) {
-    const cutoff = new Date(TODAY);
-    cutoff.setDate(TODAY.getDate() - 2);
-    cutoff.setHours(0, 0, 0, 0);
-    //console.log("cutoff =", cutoff)
+   function hasCriticalNullDates(blocks) {
+    let validDatesCount = 0;
+
     for (const b of blocks) {
       if (b.date === null) {
-        // если не нашли дату И этот блок НЕ старее позавчера
-        return true;
+        return validDatesCount < 2;
       }
-      if (b.date < cutoff) {
-        // ниже cutoff дальше можно не проверять
-        return false;
-      }
+
+      validDatesCount++;
     }
+
     return false;
   }
 
@@ -1183,14 +1173,13 @@
 .gpv-interval-removed.gpv-interval-inactive {
   color: #a0b9a5 !important;
   background: #f1f7f2 !important;
-  border-color: #dce9de !important;
+  border-color: #c2cbc0 !important;
   text-decoration: line-through;
   text-decoration-color: #a0b9a5;
-  box-shadow: none !important;
 }
 
 .gpb-block:not(.gpv-old-version) .gpv-interval-removed:not(.gpv-interval-inactive) {
-  background: #e1f2e5 !important;
+  background: #eff6f1 !important;
   border-color: #9bc9a7 !important;
   color: #087a35 !important;
   text-decoration-color: #087a35 !important;
