@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPV parser исправление под новую весртку сайта
 // @namespace    GPV parser
-// @version      3.5.5
+// @version      3.5.6
 // @description  Парсинг графіка ГПВ
 // @match        https://www.zoe.com.ua/outage/*
 // @run-at       document-start
@@ -622,27 +622,17 @@
   }
 
 
-    /**
-   * если среди всех blocks есть block.date === null,
-   * и такой блок идёт в графиках НЕ раньше чем TODAY - 2 дня.
-   *
-   * Если такие null-даты существуют, показываем все
-   */
-  function hasCriticalNullDates(blocks) {
-    const cutoff = new Date(TODAY);
-    cutoff.setDate(TODAY.getDate() - 2);
-    cutoff.setHours(0, 0, 0, 0);
-    //console.log("cutoff =", cutoff)
+   function hasCriticalNullDates(blocks) {
+    let validDatesCount = 0;
+
     for (const b of blocks) {
       if (b.date === null) {
-        // если не нашли дату И этот блок НЕ старее позавчера
-        return true;
+        return validDatesCount < 2;
       }
-      if (b.date < cutoff) {
-        // ниже cutoff дальше можно не проверять
-        return false;
-      }
+
+      validDatesCount++;
     }
+
     return false;
   }
 
